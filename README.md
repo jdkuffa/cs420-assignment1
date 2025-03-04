@@ -1,4 +1,4 @@
-# GenAI for Software Development (Ngram)
+# GenAI for Software Development (N-gram Model)
 
 * [1 Introduction](#1-introduction)  
 * [2 Getting Started](#2-getting-started)  
