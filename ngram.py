@@ -207,7 +207,7 @@ def filter_ascii_methods(df, column):
 
 def tokenize_methods(df, column):
     """
-    Tokenizes the 'Java Methods' column using javalang and adds a list of tokens to the df.
+    Tokenizes the 'Java Methods' column and adds a list of tokens to the df.
     Also collects all tokens into a list.
     """
     all_tokens = []
@@ -226,39 +226,43 @@ def tokenize_methods(df, column):
 
     # Apply the tokenize function to each method in the dataframe
     df["Java Method Tokens"] = df[column].apply(tokenize)
-    
     return df, all_tokens
 
 
 def preprocessing():
     input_csv = "data/extracted_methods_pydriller.csv"
 
+    # Read in the CSV file containing extracted methods
     df = pd.read_csv(input_csv)
-    #print(df['Method Code'])
 
+    # Clean 'Method Code' column using preprocessing steps
     df = remove_comments_from_methods(df, column="Method Code")
     df = remove_duplicates(df)
     df = remove_outliers(df)
     df = remove_boilerplate_methods(df)
     df = filter_ascii_methods(df, column="Java Methods")
 
-    #print(df['Java Methods'])
-
+    # Tokenize 'Java Methods' column
     df, all_tokens = tokenize_methods(df, column="Java Methods")
 
-    #print(df["Java Method Tokens"])
+    # Print list of all tokens
     #print("Total Tokens:",len(all_tokens))
-    #print(all_tokens) #vocab
+    #print(all_tokens)
 
+    df['Java Methods'] = df['Java Methods'].apply(lambda x: ' '.join(x.replace('\n', ' ').split()))
+
+    ######### Creates STUDENT_TRAINING.TXT file! #########
+    # Convert 'Java Methods' df column into .txt file
     java_methods = df['Java Methods'].dropna().astype(str)
 
     with open('datasets/student_training.txt', 'w', encoding='utf-8') as file:
         for method in java_methods:
-            single_line_method = " ".join(method.splitlines())  # Remove newlines within each method
-            file.write(single_line_method + '\n')  # Write each method as a single line
+            method_sentence = " ".join(method.splitlines())  # Remove newlines within each method
+            file.write(method_sentence + '\n')  # Write each method as a single line
     
     split_txt_file('datasets/student_training.txt', train_ratio=80, val_ratio=10, test_ratio=10)
-    
+
+
 def split_txt_file(input_txt, train_ratio, val_ratio, test_ratio,
                    random_state=42, shuffle=False):
     """
@@ -302,9 +306,10 @@ method_count = 0
 
 def main():
     # Extract methods from repositories and save to CSV
-    #dataset_collection()
+    # dataset_collection()
 
-    preprocessing()
+    preprocessing() #Prints [all_tokens] which prints list of tokens/
+    # tokens = preprocessing()
 
 if __name__ == "__main__":
   main()
