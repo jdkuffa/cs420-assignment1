@@ -5,7 +5,9 @@ import random
 import subprocess
 import tempfile
 import git
+import json
 import pandas as pd
+import math
 from pydriller import Repository
 import javalang
 from javalang.parse import parse
@@ -13,6 +15,7 @@ from javalang.tree import MethodDeclaration
 from pygments.lexers import JavaLexer
 from pygments import lex
 from pygments.token import Token
+from collections import OrderedDict, defaultdict
 
 
 # def clone_repository(repo_url, target_dir):
@@ -249,18 +252,18 @@ def preprocessing():
     #print("Total Tokens:",len(all_tokens))
     #print(all_tokens)
 
-    df['Java Methods'] = df['Java Methods'].apply(lambda x: ' '.join(x.replace('\n', ' ').split()))
-
+    df['Java Methods'] = df['Java Methods'].apply(lambda x: ' '.join(re.findall(r'\w+|[^\w\s]', x)))
     ######### Creates STUDENT_TRAINING.TXT file! #########
     # Convert 'Java Methods' df column into .txt file
     java_methods = df['Java Methods'].dropna().astype(str)
 
-    with open('datasets/student_training.txt', 'w', encoding='utf-8') as file:
+    with open('data/student_training.txt', 'w', encoding='utf-8') as file:
         for method in java_methods:
             method_sentence = " ".join(method.splitlines())  # Remove newlines within each method
             file.write(method_sentence + '\n')  # Write each method as a single line
     
-    split_txt_file('datasets/student_training.txt', train_ratio=80, val_ratio=10, test_ratio=10)
+    split_txt_file('data/student_training.txt', train_ratio=80, val_ratio=10, test_ratio=10)
+    return all_tokens
 
 
 def split_txt_file(input_txt, train_ratio, val_ratio, test_ratio,
@@ -291,14 +294,169 @@ def split_txt_file(input_txt, train_ratio, val_ratio, test_ratio,
     test_lines = lines[train_count + val_count:]
 
     # Write the resulting split datasets to separate TXT files
-    with open('datasets/output_train.txt', "w", encoding="utf-8") as train_file:
+    with open('data/output_train.txt', "w", encoding="utf-8") as train_file:
         train_file.writelines(train_lines)
     
-    with open('datasets/output_val.txt', "w", encoding="utf-8") as val_file:
+    with open('data/output_val.txt', "w", encoding="utf-8") as val_file:
         val_file.writelines(val_lines)
     
-    with open('datasets/output_test.txt', "w", encoding="utf-8") as test_file:
+    with open('data/output_test.txt', "w", encoding="utf-8") as test_file:
         test_file.writelines(test_lines)
+
+def create_n_gram_prob_df(corpus, n):
+    count_matrix_dict = defaultdict(int)
+    count_vocab = defaultdict(int)
+
+    # Build frequency counts
+    for i in range(len(corpus) - n + 1):
+        n_gram = tuple(corpus[i:i + n])
+        n_minus_1_gram = n_gram[:-1]
+        last_word = n_gram[-1]
+
+        count_matrix_dict[(n_minus_1_gram, last_word)] += 1
+        count_vocab[last_word] += 1
+
+    # Compute probabilities
+    prob_matrix = {k: v / count_vocab[k[1]] for k, v in count_matrix_dict.items()}
+
+    # Convert to DataFrame
+    df = pd.DataFrame.from_dict(prob_matrix, orient='index', columns=['Probability'])
+    df.index = pd.MultiIndex.from_tuples(df.index, names=['N-1 Gram', 'Next Word'])
+
+    return df
+
+# Testing
+def generate_next_token_prob(sentence, n, df):
+  """
+  Generate the most probable next token and probability based on a probability df. Returns tuple (next_token, next_token_prob).
+  """
+  n_gram = tuple(sentence[len(sentence)-n:len(sentence)])
+  n_gram_prefix = n_gram[len(n_gram)-n+1::]
+#   if n_gram_prefix not in df.index:
+#     print(f"Warning: {n_gram_prefix} not found in df index.")
+#     return None
+  ###-----non-random
+  next_word = df.loc[n_gram_prefix].idxmax()[0]
+  next_word_prob = df.loc[n_gram_prefix].max()[0]
+
+  ##----non-random
+
+
+  ##--- randomness 
+  # All possible next words for the given prefix
+  # next_words = df.loc[n_gram_prefix]
+
+  # if len(next_words) >1 :
+  #   print("multiple next words")
+  # else:
+  #   print("single next word")
+
+  # # Find the max probability
+  # next_word_prob = next_words['Probability'].max()
+
+  # # Get all words with the max probability
+  # candidates = next_words[next_words['Probability'] == next_word_prob].index.to_list()
+
+  # # Choose randomly among the highest probability words
+  # next_word = np.random.choice(candidates)
+  ##--- randomness 
+
+  return (next_word, next_word_prob)
+
+# Evaluation
+def iterative_prediction(sentence, n, df):
+  """
+  Returns a list of tuples containing the next tokens generated to complete the sentence and their probabilities.
+  """
+  gen_token_prob = []
+
+  def code_completion(sentence, n, df, remain_token_count):
+    """
+    Recursively generates text until a stopping condition is met.
+    """
+    if remain_token_count <= 0:
+      return sentence
+
+
+    # Generate the next token and probability
+    generate_next_token_res = generate_next_token_prob(sentence, n, df)
+
+    # if not generate_next_token_res:
+    #     return sentence
+
+    next_token = generate_next_token_res[0]
+    next_token_prob = generate_next_token_res[1]
+
+    # Append the next token to the sentence and recursively generate more text
+    sentence.append(next_token)
+
+    # Add next token and probability to dictionary
+    gen_token_prob.append((next_token, str(next_token_prob)))
+
+    return code_completion(sentence, n, df, remain_token_count-1)
+
+  start_sentence = sentence[:n]
+  final_sentence = code_completion(start_sentence, n, df, len(sentence) - n)
+  return gen_token_prob
+
+
+def create_results_json(predict_prob_dict, filename, limit):
+  """
+  Creates a json file containing the results of the iterative prediction.
+  """
+  with open(filename + '.json', 'w') as f:
+    f.write('{\n')
+    for index, (key, values) in enumerate(predict_prob_dict.items()):
+        f.write(f'"{key}": {json.dumps(values)}')
+        # Prevents trailing last comma
+        if index < limit-1:
+            f.write(',\n')
+        else:
+            f.write('\n')
+            break
+    f.write('}\n')
+
+def generate_predict_prob(sentences, n, model):
+    """
+    Returns a dictionary with each predicted token and its respective probability
+    """
+    predict_prob = OrderedDict()
+    for sentence in sentences:
+        # Get the probability values of the predictions made
+        gen_token_prob = iterative_prediction(sentence, n, model)
+
+        # Add probabilities to dictionary with progressive ID as the key
+        predict_prob[len(predict_prob)] = gen_token_prob
+    return predict_prob
+
+def calculate_perplexity(predict_prob_dict, model):
+    """
+    Calculates the perplexity of a dictionary containing the results of the iterative predictions and their probabilities. 
+    """
+    log_prob_sum = 0.0
+    total_tokens = 0
+    for _,predictions in predict_prob_dict.items():
+        for _, prob in predictions:
+            prob = float(prob)
+            if prob > 0:
+                # Use log probability
+                log_prob_sum += math.log(prob)  
+                total_tokens += 1
+    perplexity = math.exp(-log_prob_sum / total_tokens)
+    return perplexity
+
+def tokenize_java_file(file_path):
+  with open(file_path, 'r', encoding='utf-8') as f:
+      java_code = f.read().split()
+
+  return java_code
+
+def convert_txt_to_sentences(file_path):
+    sentences = []
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            sentences.append(line.strip().split())
+    return sentences
 
 
 # Global counter to track the total number of methods processed
@@ -306,10 +464,47 @@ method_count = 0
 
 def main():
     # Extract methods from repositories and save to CSV
-    # dataset_collection()
+    #dataset_collection()
 
-    preprocessing() #Prints [all_tokens] which prints list of tokens/
-    # tokens = preprocessing()
+    # Cleaning and preprocessing method data into tokens 
+    # preprocessing()
+    # tokens = tokenize_java_file("data/student_training.txt")
+    # # for token in tokens:
+    # #     print(token, "\n")
+    # # Creating N-gram model
+    # n = 3
+    # model = create_n_gram_prob_df(tokens, n)
+
+    # # # Evaluate model, best model is n = X TODO
+    # eval_sentences = convert_txt_to_sentences("data/student_training.txt")
+    # eval_sentences_predic_prob_dict = generate_predict_prob(eval_sentences,n,model)
+    # create_results_json(eval_sentences_predic_prob_dict,"results_student_model", 100)
+
+    # eval_sentences_perplexity = calculate_perplexity(eval_sentences_predic_prob_dict, model)
+    # print("eval_sentences_perplexity", eval_sentences_perplexity)
+
+    # Test best model
+    # test_sentences = convert_txt_to_sentences("data/output_test.txt")
+    # test_sentences_predic_prob_dict = generate_predict_prob(test_sentences,n,model)
+    # test_sentences_perplexity = calculate_perplexity(test_sentences_predic_prob_dict, model)
+    # print("test_sentences_perplexity", test_sentences_perplexity)
+    # create_results_json(test_sentences_predic_prob_dict,"results_student_model", 100)
+
+
+
+    # ####testing 
+    tokens = tokenize_java_file("training.txt")
+    n = 3 
+    model = create_n_gram_prob_df(tokens, n)
+    sentences = convert_txt_to_sentences("training.txt")
+    predic_prob_dict = generate_predict_prob(sentences, n , model)
+    # print(predic_prob_dict)
+    perplexity = calculate_perplexity(predic_prob_dict, model)
+    create_results_json(predic_prob_dict, "prof", 100)
+    # print(perplexity)
+
+
+    ## TODO repeat above process with prof antonio's data 
 
 if __name__ == "__main__":
   main()
