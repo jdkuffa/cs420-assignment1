@@ -1,13 +1,19 @@
-import pandas as pd
-from pydriller import Repository
 import os
-from javalang.parse import parse
-from javalang.tree import MethodDeclaration
 import csv
-import javalang
-import git
+import re
+import random
 import subprocess
 import tempfile
+import git
+import pandas as pd
+from pydriller import Repository
+import javalang
+from javalang.parse import parse
+from javalang.tree import MethodDeclaration
+from pygments.lexers import JavaLexer
+from pygments import lex
+from pygments.token import Token
+
 
 # def clone_repository(repo_url, target_dir):
 #     """
@@ -114,8 +120,8 @@ def extract_methods_to_csv(repo_list, output_csv):
                             csv_writer.writerow([branch_name, commit.hash, modified_file.filename, method_name, method_code, commit_link])
                             method_count += 1
 
-                            if method_count >= 30000:
-                                print("Reached the limit of 30,000 methods. Stopping extraction.")
+                            if method_count >= 100000:
+                                print("Reached the limit of 100,000 methods. Stopping extraction.")
                                 return
 
 
@@ -145,12 +151,160 @@ def dataset_collection():
 
     print(f"Method extraction completed. Total methods processed: {method_count}. Results saved to {output_csv_file}.")
 
+
+def remove_comments_from_methods(df, column):
+    """
+    Removes comments from Java methods and adds a new column 'Java Methods'.
+    """
+    def remove_comments(code):
+        lexer = JavaLexer()
+        tokens = lex(code, lexer)
+
+        clean_code = ''.join(token[1] for token in tokens if token[0] not in Token.Comment)
+        return clean_code
+
+    # Apply remove_comments to each method in the dataframe
+    df["Java Methods"] = df[column].apply(remove_comments)
+    return df
+
+
+def remove_duplicates(df):
+    """
+    Removes exact duplicates from the 'Java Methods' column.
+    """
+    return df.drop_duplicates(subset="Java Methods", keep="first")
+
+
+def remove_outliers(df, lower_percentile=3, upper_percentile=97):
+    """
+    Removes outliers (methods that are too long or too short).
+    """
+    method_lengths = df["Java Methods"].apply(len)
+    lower_bound = method_lengths.quantile(lower_percentile / 100)
+    upper_bound = method_lengths.quantile(upper_percentile / 100)
+    return df[(method_lengths >= lower_bound) & (method_lengths <= upper_bound)]
+
+
+def remove_boilerplate_methods(df):
+    """
+    Removes setter/getter methods (boilerplate methods).
+    """
+    boilerplate_patterns = [
+        r"\bset[A-Z][a-zA-Z0-9_]*\(.*\)\s*{",  # Setter methods
+        r"\bget[A-Z][a-zA-Z0-9_]*\(.*\)\s*{",  # Getter methods
+    ]
+    boilerplate_regex = re.compile("|".join(boilerplate_patterns))
+    return df[~df["Java Methods"].apply(lambda x: bool(boilerplate_regex.search(x)))]
+
+
+def filter_ascii_methods(df, column):
+    """
+    Filters out methods containing non-ASCII characters.
+    """
+    df = df[df[column].apply(lambda x: all(ord(char) < 128 for char in x))]
+    return df
+
+
+def tokenize_methods(df, column):
+    """
+    Tokenizes the 'Java Methods' column using javalang and adds a list of tokens to the df.
+    Also collects all tokens into a list.
+    """
+    all_tokens = []
+
+    def tokenize(code):
+        # Tokenize each Java method using javalang
+        tokens = []
+        try:
+            # Tokenize Java code using javalang
+            for token in javalang.tokenizer.tokenize(code):
+                tokens.append(token.value)
+                all_tokens.append(token.value)
+        except Exception as e:
+            print(f"Error tokenizing method: {e}")
+        return tokens
+
+    # Apply the tokenize function to each method in the dataframe
+    df["Java Method Tokens"] = df[column].apply(tokenize)
+    
+    return df, all_tokens
+
+
+def preprocessing():
+    input_csv = "data/extracted_methods_pydriller.csv"
+
+    df = pd.read_csv(input_csv)
+    #print(df['Method Code'])
+
+    df = remove_comments_from_methods(df, column="Method Code")
+    df = remove_duplicates(df)
+    df = remove_outliers(df)
+    df = remove_boilerplate_methods(df)
+    df = filter_ascii_methods(df, column="Java Methods")
+
+    #print(df['Java Methods'])
+
+    df, all_tokens = tokenize_methods(df, column="Java Methods")
+
+    #print(df["Java Method Tokens"])
+    #print("Total Tokens:",len(all_tokens))
+    #print(all_tokens) #vocab
+
+    java_methods = df['Java Methods'].dropna().astype(str)
+
+    with open('datasets/student_training.txt', 'w', encoding='utf-8') as file:
+        for method in java_methods:
+            single_line_method = " ".join(method.splitlines())  # Remove newlines within each method
+            file.write(single_line_method + '\n')  # Write each method as a single line
+    
+    split_txt_file('datasets/student_training.txt', train_ratio=80, val_ratio=10, test_ratio=10)
+    
+def split_txt_file(input_txt, train_ratio, val_ratio, test_ratio,
+                   random_state=42, shuffle=False):
+    """
+    Splits an input TXT file into three separate TXT files based on specified ratios.
+    """
+    # Check that the ratios add up to 100
+    if (train_ratio + val_ratio + test_ratio) != 100:
+        raise ValueError("The sum of train_ratio, val_ratio, and test_ratio must equal 100")
+
+    # Read the TXT file into a list of lines
+    with open(input_txt, "r", encoding="utf-8") as file:
+        lines = file.readlines()
+
+    # Optionally shuffle the lines to randomize where the splits are
+    if shuffle:
+        random.seed(random_state)
+        random.shuffle(lines)
+
+    total_lines = len(lines)
+    train_count = int((train_ratio / 100) * total_lines)
+    val_count = int((val_ratio / 100) * total_lines)
+
+    # Split the lines into train, validation, and test sets
+    train_lines = lines[:train_count]
+    val_lines = lines[train_count:train_count + val_count]
+    test_lines = lines[train_count + val_count:]
+
+    # Write the resulting split datasets to separate TXT files
+    with open('datasets/output_train.txt', "w", encoding="utf-8") as train_file:
+        train_file.writelines(train_lines)
+    
+    with open('datasets/output_val.txt', "w", encoding="utf-8") as val_file:
+        val_file.writelines(val_lines)
+    
+    with open('datasets/output_test.txt', "w", encoding="utf-8") as test_file:
+        test_file.writelines(test_lines)
+
+
 # Global counter to track the total number of methods processed
 method_count = 0
 
 def main():
     # Extract methods from repositories and save to CSV
-    dataset_collection()
+    #dataset_collection()
+
+    preprocessing()
 
 if __name__ == "__main__":
   main()
