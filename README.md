@@ -1,4 +1,4 @@
-# GenAI for Software Development (Ngram)
+# GenAI for Software Development (N-gram Model)
 
 * [1 Introduction](#1-introduction)  
 * [2 Getting Started](#2-getting-started)  
@@ -41,6 +41,7 @@ For macOS/Linux:
 
 To deactivate the virtual environment, use the command:
 
+
 (venv) $ deactivate
 ```
 
@@ -48,7 +49,9 @@ To deactivate the virtual environment, use the command:
 
 Install the required dependencies:
 
+```
 (venv) ~/cs420-assignment1 $ pip install -r requirements.txt
+```
 
 ## **2.3 Run N-gram**
 
@@ -57,11 +60,10 @@ Install the required dependencies:
 The script takes a corpus of Java methods as input and automatically identifies the best-performing model based on a specific N-value. It then evaluates the selected model on the test set extracted according to the assignment specifications.
 Since the training corpus differs from both the instructor-provided dataset and our own dataset, we store the results in a file named results_provided_model.[json/csv/txt] to distinguish them accordingly.
 
-(venv) ~/your-project $ python ngram.py corpus.txt
-
+```
+(venv) ~/cs420-assignment1 $ python ngram.py corpus.txt
+```
 
 ## 3. Report
 
-The assignment report is available in the file Assignment_Report.pdf.
-
-
+The assignment report is available in the file "Assignment_Report.pdf."
