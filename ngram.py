@@ -86,15 +86,12 @@ def extract_methods_from_java(code):
     except javalang.parser.JavaSyntaxError as e:
         print(f"Syntax error in Java code: {e}")
         print(f"Problematic code:\n{code[:500]}")
-        methods = []
 
     except Exception as e:
         print(f"Unexpected error parsing Java code: {e}")
         print(f"Problematic code snippet:\n{code[:500]}") 
-        methods = []
 
     return methods
-
 
 def extract_methods_to_csv(repo_list, output_csv):
     """
@@ -104,28 +101,29 @@ def extract_methods_to_csv(repo_list, output_csv):
 
     with open(output_csv, mode="w", newline="", encoding="utf-8") as csvfile:
         csv_writer = csv.writer(csvfile)
-        csv_writer.writerow(["Branch Name", "Commit Hash", "File Name", "Method Name", "Method Code", "Commit Link"]) 
+        csv_writer.writerow(["File Name", "Method Name", "Method Code"]) 
 
         for repo_path in repo_list:
-            print(f"Processed 1 more repository: {repo_path}. {method_count} methods processed so far...")
+            print(f"Processing repository: {repo_path}. {method_count} methods processed so far...")
 
             branch_name = get_default_branch(repo_path)
+            repo = git.Repo.clone_from(repo_path, tempfile.mkdtemp(), branch=branch_name)
 
-            for commit in Repository(repo_path, only_in_branch=branch_name).traverse_commits():
+            for root, _, files in os.walk(repo.working_tree_dir):
+                for file in files:
+                    if file.endswith(".java"):
+                        file_path = os.path.join(root, file)
+                        with open(file_path, "r", encoding="utf-8") as java_file:
+                            source_code = java_file.read()
+                            methods = extract_methods_from_java(source_code)
 
-                for modified_file in commit.modified_files:
-                    if modified_file.filename.endswith(".java") and modified_file.source_code:
-                        methods = extract_methods_from_java(modified_file.source_code)
+                            for method_name, method_code in methods:
+                                csv_writer.writerow([file, method_name, method_code])
+                                method_count += 1
 
-                        for method_name, method_code in methods:
-                            commit_link = f"{repo_path}/commit/{commit.hash}"
-                            csv_writer.writerow([branch_name, commit.hash, modified_file.filename, method_name, method_code, commit_link])
-                            method_count += 1
-
-                            if method_count >= 100000:
-                                print("Reached limit of 100,000 methods. Stopping extraction.")
-                                return
-
+                                if method_count >= MAX_METHODS:
+                                    print("Reached limit of 100,000 methods. Stopping extraction.")
+                                    return
 
 def remove_comments_from_methods(df, column):
     """
@@ -226,40 +224,6 @@ def tokenize_methods(df, column):
     return df, all_tokens
 
 
-def preprocessing():
-    input_csv = OUTPUT_CSV_PATH
-
-    # Read in the CSV file containing extracted methods
-    df = pd.read_csv(input_csv)
-
-    # Clean "Method Code" column using preprocessing steps
-    df = remove_comments_from_methods(df, column="Method Code")
-    df = remove_duplicates(df)
-    df = remove_outliers(df)
-    df = remove_boilerplate_methods(df)
-    df = filter_ascii_methods(df, column="Java Methods")
-    df = remove_unbalanced_delimiters(df)
-
-    # Tokenize "Java Methods" column
-    df, all_tokens = tokenize_methods(df, column="Java Methods")
-
-    # Print list of all tokens
-    print("Total Tokens:",len(all_tokens))
-    #print(all_tokens)
-
-    df["Java Methods"] = df["Java Methods"].apply(lambda x: " ".join(re.findall(r"\w+|[^\w\s]", x)))
-
-    # Convert "Java Methods" df column into .txt file
-    java_methods = df["Java Methods"].dropna().astype(str)
-
-    with open(STUDENT_TRAINING_PATH, "w", encoding="utf-8") as file:
-        for method in java_methods:
-            method_sentence = " ".join(method.splitlines())  # Remove newlines within each method
-            file.write(method_sentence + "\n")  # Write each method as a single line
-    
-    split_txt_file(STUDENT_TRAINING_PATH, train_ratio=80, val_ratio=10, test_ratio=10)
-
-
 def split_txt_file(input_txt, train_ratio, val_ratio, test_ratio,
                    random_state=42, shuffle=False):
     """
@@ -347,6 +311,7 @@ def preprocessing():
     df = remove_outliers(df)
     df = remove_boilerplate_methods(df)
     df = filter_ascii_methods(df, column="Java Methods")
+    df = remove_unbalanced_delimiters(df)
 
     # Tokenize "Java Methods" column
     df, all_tokens = tokenize_methods(df, column="Java Methods")
