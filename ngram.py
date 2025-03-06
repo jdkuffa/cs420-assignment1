@@ -21,6 +21,7 @@ from collections import OrderedDict, defaultdict
 
 
 # Constants
+REPO_NUM = 50
 MAX_METHODS = 100000
 TRAIN_RATIO = 80
 VAL_RATIO = 10
@@ -291,7 +292,7 @@ def dataset_extraction():
     repo_list = []
     for index, row in repos.iterrows():
         repo_list.append("https://www.github.com/{}".format(row["name"]))
-    repo_list = repo_list[:10]
+    repo_list = repo_list[:REPO_NUM]
 
     # Run the extraction
     extract_methods_to_csv(repo_list, OUTPUT_CSV_PATH)
