@@ -30,8 +30,8 @@ TEST_RATIO = 10
 RANDOM_STATE = 42
 
 # File paths
-REPO_CSV_PATH = "data/repositories_test.csv"
-OUTPUT_CSV_PATH = "data/generated_files/extracted_methods_test.csv"
+REPO_CSV_PATH = "data/repositories.csv"
+OUTPUT_CSV_PATH = "data/generated_files/extracted_methods.csv"
 STUDENT_TRAINING_PATH = "data/datasets/student_training.txt"
 OUTPUT_TRAIN_PATH = "data/datasets/output_train.txt"
 OUTPUT_VAL_PATH = "data/datasets/output_val.txt"
@@ -532,9 +532,7 @@ def main():
     # create_results_json(predic_prob_dict, "prof", 100)
     # print(perplexity)
 
-
     if len(sys.argv) == 2:
-
         """
         The following methods were used to to generate our train, test, and eval sets
         # Extract methods from repositories and save to CSV
@@ -543,7 +541,6 @@ def main():
         # Cleaning and preprocessing method data into tokens 
         preprocessing()
         """
-
 
         corpus_path = sys.argv[1]
 

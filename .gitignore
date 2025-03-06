@@ -25,7 +25,3 @@ replay_pid*
 
 # Virtual environemnt
 venv/
-
-# Generated files
-data/generated_methods/
-data/datasets/
