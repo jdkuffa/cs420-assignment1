@@ -382,30 +382,30 @@ def iterative_prediction(sentence, n, df):
     gen_token_prob = []
 
 
-def code_completion(sentence, n, df, remain_token_count):
-    """
-    Recursively generates text until a stopping condition is met.
-    """
-    if remain_token_count <= 0:
-      return sentence
+    def code_completion(sentence, n, df, remain_token_count):
+        """
+        Recursively generates text until a stopping condition is met.
+        """
+        if remain_token_count <= 0:
+            return sentence
 
 
-    # Generate the next token and probability
-    generate_next_token_res = generate_next_token_prob(sentence, n, df)
+        # Generate the next token and probability
+        generate_next_token_res = generate_next_token_prob(sentence, n, df)
 
-    if not generate_next_token_res:
-        return sentence
+        if not generate_next_token_res:
+            return sentence
 
-    next_token = generate_next_token_res[0]
-    next_token_prob = generate_next_token_res[1]
+        next_token = generate_next_token_res[0]
+        next_token_prob = generate_next_token_res[1]
 
-    # Append the next token to the sentence and recursively generate more text
-    sentence.append(next_token)
+        # Append the next token to the sentence and recursively generate more text
+        sentence.append(next_token)
 
-    # Add next token and probability to dictionary
-    gen_token_prob.append((next_token, str(next_token_prob)))
+        # Add next token and probability to dictionary
+        gen_token_prob.append((next_token, str(next_token_prob)))
 
-    return code_completion(sentence, n, df, remain_token_count-1)
+        return code_completion(sentence, n, df, remain_token_count-1)
 
     start_sentence = sentence[:n]
     final_sentence = code_completion(start_sentence, n, df, len(sentence) - n)
@@ -443,7 +443,7 @@ def generate_predict_prob(sentences, n, model):
     return predict_prob
 
 
-def calculate_perplexity(predict_prob_dict, model):
+def calculate_perplexity(predict_prob_dict):
     """
     Calculates the perplexity of a dictionary containing the results of the iterative predictions and their probabilities. 
     """
@@ -480,57 +480,6 @@ def convert_txt_to_sentences(file_path):
 method_count = 0
 
 def main():
-    # Time the dataset collection process
-    start_time = time.time()
-    dataset_extraction()
-    end_time = time.time()
-    print(f"Dataset extraction took {end_time - start_time:.2f} seconds.")
-
-    # Time the preprocessing process
-    start_time = time.time()
-    preprocessing()
-    end_time = time.time()
-    print(f"Preprocessing took {end_time - start_time:.2f} seconds.")
-    # tokens = tokenize_java_file("data/student_training.txt")
-    # # for token in tokens:
-    # #     print(token, "\n")
-    
-    # # Creating N-gram model
-    # n = 3
-    # model = create_n_gram_prob_df(tokens, n)
-
-    # # Evaluate model, best model is n = X TODO
-    # eval_sentences = convert_txt_to_sentences("data/student_training.txt")
-    # eval_sentences_predic_prob_dict = generate_predict_prob(eval_sentences,n,model)
-    # create_results_json(eval_sentences_predic_prob_dict,"results_student_model", 100)
-
-    # eval_sentences_perplexity = calculate_perplexity(eval_sentences_predic_prob_dict, model)
-    # print("eval_sentences_perplexity", eval_sentences_perplexity)
-
-    # # Test best model
-    # test_sentences = convert_txt_to_sentences("data/output_test.txt")
-    # test_sentences_predic_prob_dict = generate_predict_prob(test_sentences,n,model)
-
-    # test_sentences_perplexity = calculate_perplexity(test_sentences_predic_prob_dict, model)
-    # print("test_sentences_perplexity", test_sentences_perplexity)
-
-    # create_results_json(test_sentences_predic_prob_dict,"results_student_model", 100)
-
-
-
-    # ####testing 
-    tokens = tokenize_java_file("training.txt")
-    n = 3 
-    model = create_n_gram_prob_df(tokens, n)
-    print(model)
-    print(model.index.levels[0])
-    # print(model['N-1 Gram'].values)
-    sentences = convert_txt_to_sentences("training.txt")
-    predic_prob_dict = generate_predict_prob(sentences, n , model)
-    # # print(predic_prob_dict)
-    # perplexity = calculate_perplexity(predic_prob_dict, model)
-    # create_results_json(predic_prob_dict, "prof", 100)
-    # print(perplexity)
 
     if len(sys.argv) == 2:
         """
@@ -552,20 +501,24 @@ def main():
         n_values = [3,5,7]
         for n in n_values:
             model = create_n_gram_prob_df(vocab_tokens, n)
+            filename = "ngram_" + str(n) + "_model.pkl"
+            save_ngram_model(model, filename)
+            
             predic_prob_dict = generate_predict_prob(eval_sentences, n , model)
             perplexity = calculate_perplexity(predic_prob_dict)
             models_perplex.append((n,perplexity))
         best_n = min(models_perplex, key=itemgetter(1))[0]
-        print("best model is ", best_n, " with the perplexity of ", min(models_perplex, key=itemgetter(1))[1])
 
         # Testing with best-performing model
-        model = create_n_gram_prob_df(vocab_tokens, best_n)
+        best_model_filename = "ngram_" + str(best_n) + "_model.pkl"
+        model = load_ngram_model(best_model_filename)
         test_sentences = convert_txt_to_sentences(OUTPUT_TEST_PATH)
         rand_test_sentences = random.sample(test_sentences, k = 100) 
 
+        # Create results json
         predic_prob_dict = generate_predict_prob(rand_test_sentences, best_n, model)
         perplexity = calculate_perplexity(predic_prob_dict)
-        create_results_json(predic_prob_dict, "results_student_model")
+        create_results_json(predic_prob_dict, "results_teacher_model")
 
 
 if __name__ == "__main__":
