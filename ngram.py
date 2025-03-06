@@ -1,13 +1,15 @@
 import os
 import csv
+import pickle
 import re
+import git
 import random
 import subprocess
 import tempfile
-import git
 import json
 import pandas as pd
 import math
+import time
 from pydriller import Repository
 import javalang
 from javalang.parse import parse
@@ -18,27 +20,21 @@ from pygments.token import Token
 from collections import OrderedDict, defaultdict
 
 
-# def clone_repository(repo_url, target_dir):
-#     """
-#     Clone a GitHub repository to a local directory.
-#     """
-#     try:
-#       command = ["git", "clone", repo_url, target_dir, "--recurse-submodules"]
-#       result = subprocess.run(command, capture_output=True, text=True, timeout=30, check=True)
+# Constants
+MAX_METHODS = 100000
+TRAIN_RATIO = 80
+VAL_RATIO = 10
+TEST_RATIO = 10
+RANDOM_STATE = 42
 
-#       if result.returncode == 0:
-#         print(f"Repository '{repo_url}' successfully cloned to '{target_dir}'.")
-#         return True
-#       else:
-#         print(f"Error cloning repository '{repo_url}': {result.stderr}")
-#         return False
+# File paths
+REPO_CSV_PATH = "data/repositories_test.csv"
+OUTPUT_CSV_PATH = "data/generated_files/extracted_methods_test.csv"
+STUDENT_TRAINING_PATH = "data/datasets/student_training.txt"
+OUTPUT_TRAIN_PATH = "data/datasets/output_train.txt"
+OUTPUT_VAL_PATH = "data/datasets/output_val.txt"
+OUTPUT_TEST_PATH = "data/datasets/output_test.txt"
 
-#     except subprocess.TimeoutExpired:
-#       print(f"Timeout expired while cloning repository '{repo_url}'.")
-#       return False
-#     except Exception as e:
-#       print(f"Unexpected error while cloning repository '{repo_url}': {e}")
-#       return False
 
 def get_default_branch(repo_path):
     """
@@ -46,13 +42,15 @@ def get_default_branch(repo_path):
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
-            repo = git.Repo.clone_from(repo_path, tmpdir)  # Clone repo to temp dir
-            return repo.git.symbolic_ref("refs/remotes/origin/HEAD").split("/")[-1]
+            # Clone repo to temp dir
+            repo = git.Repo.clone_from(repo_path, tmpdir)
+            # Return default branch name (e.g., "master", "main", etc.)
+            return repo.git.symbolic_ref("refs/remotes/origin/HEAD").split("/")[-1] 
         except git.exc.GitCommandError:
             pass  # Failed to get default branch
 
-        # Try checking out "main" if "master" doesn't exist
         try:
+            # Try checking out "main" if "master" doesn't exist
             repo.git.checkout("main")
             return "main"
         except git.exc.GitCommandError:
@@ -87,28 +85,29 @@ def extract_methods_from_java(code):
 
     except javalang.parser.JavaSyntaxError as e:
         print(f"Syntax error in Java code: {e}")
-        print(f"Problematic code:\n{code}")
+        print(f"Problematic code:\n{code[:500]}")
+        methods = []
 
     except Exception as e:
         print(f"Unexpected error parsing Java code: {e}")
-        print(f"Problematic code snippet:\n{code[:50]}")  # Print first 50 characters for debugging
+        print(f"Problematic code snippet:\n{code[:500]}") 
+        methods = []
 
     return methods
 
 
 def extract_methods_to_csv(repo_list, output_csv):
     """
-    Extract methods from Java files in main branch of repositories in list to a CSV file.
+    Extract methods from Java files in main branch of repositories to a CSV file.
     """
     global method_count
 
-    with open(output_csv, mode='w', newline='', encoding='utf-8') as csvfile:
+    with open(output_csv, mode="w", newline="", encoding="utf-8") as csvfile:
         csv_writer = csv.writer(csvfile)
-        csv_writer.writerow(["Commit Hash", "File Name", "Method Name", "Method Code", "Commit Link"])  # "Branch Name" omitted
+        csv_writer.writerow(["Branch Name", "Commit Hash", "File Name", "Method Name", "Method Code", "Commit Link"]) 
 
         for repo_path in repo_list:
-            print(f"Processed {repo_path} repository. {method_count} methods processed so far...")
-
+            print(f"Processed 1 more repository: {repo_path}. {method_count} methods processed so far...")
 
             branch_name = get_default_branch(repo_path)
 
@@ -124,46 +123,19 @@ def extract_methods_to_csv(repo_list, output_csv):
                             method_count += 1
 
                             if method_count >= 100000:
-                                print("Reached the limit of 100,000 methods. Stopping extraction.")
+                                print("Reached limit of 100,000 methods. Stopping extraction.")
                                 return
-
-
-def dataset_collection():
-    """
-    Collect dataset of Java methods from repositories.
-    """
-    # Read in the CSV file containing repository names
-    repos = pd.read_csv('data/repositories.csv')
-
-    # TO DO: Clone repositories from the CSV file
-    # print("Cloning repositories...")
-    # for repo_url in repo_list:
-    #   clone_repository(repo_url, base_dir)
-
-    # Create a list of repository URLs
-    repo_list = []
-    for index, row in repos.iterrows():
-        repo_list.append("https://www.github.com/{}".format(row['name']))
-    repo_list = repo_list[:10]
-
-    # Specify the path to the output CSV file
-    output_csv_file = f"data/extracted_methods_pydriller.csv"
-
-    # Run the extraction
-    extract_methods_to_csv(repo_list, output_csv_file)
-
-    print(f"Method extraction completed. Total methods processed: {method_count}. Results saved to {output_csv_file}.")
 
 
 def remove_comments_from_methods(df, column):
     """
-    Removes comments from Java methods and adds a new column 'Java Methods'.
+    Removes comments from Java methods and adds "Java Methods" as a new column.
     """
     def remove_comments(code):
         lexer = JavaLexer()
         tokens = lex(code, lexer)
 
-        clean_code = ''.join(token[1] for token in tokens if token[0] not in Token.Comment)
+        clean_code = "".join(token[1] for token in tokens if token[0] not in Token.Comment)
         return clean_code
 
     # Apply remove_comments to each method in the dataframe
@@ -173,7 +145,7 @@ def remove_comments_from_methods(df, column):
 
 def remove_duplicates(df):
     """
-    Removes exact duplicates from the 'Java Methods' column.
+    Removes exact duplicates from the "Java Methods" column.
     """
     return df.drop_duplicates(subset="Java Methods", keep="first")
 
@@ -200,6 +172,27 @@ def remove_boilerplate_methods(df):
     return df[~df["Java Methods"].apply(lambda x: bool(boilerplate_regex.search(x)))]
 
 
+def remove_unbalanced_delimiters(df):
+    """
+    Removes methods with unbalanced delimiters from the DataFrame.
+    """
+    def is_balanced(code):
+        stack = []
+        opening = {'(': ')', '{': '}', '[': ']', '<': '>'}
+        closing = {')': '(', '}': '{', ']': '[', '>': '<'}
+        
+        for char in code:
+            if char in opening:
+                stack.append(char)
+            elif char in closing:
+                if not stack or stack.pop() != closing[char]:
+                    return False
+        return not stack
+
+    df = df[df["Java Methods"].apply(is_balanced)]
+    return df
+
+
 def filter_ascii_methods(df, column):
     """
     Filters out methods containing non-ASCII characters.
@@ -210,13 +203,12 @@ def filter_ascii_methods(df, column):
 
 def tokenize_methods(df, column):
     """
-    Tokenizes the 'Java Methods' column and adds a list of tokens to the df.
+    Tokenizes the "Java Methods" column and adds a list of tokens to the df.
     Also collects all tokens into a list.
     """
     all_tokens = []
 
     def tokenize(code):
-        # Tokenize each Java method using javalang
         tokens = []
         try:
             # Tokenize Java code using javalang
@@ -229,41 +221,43 @@ def tokenize_methods(df, column):
 
     # Apply the tokenize function to each method in the dataframe
     df["Java Method Tokens"] = df[column].apply(tokenize)
+    
+    print(df["Java Method Tokens"].head())
     return df, all_tokens
 
 
 def preprocessing():
-    input_csv = "data/extracted_methods_pydriller.csv"
+    input_csv = OUTPUT_CSV_PATH
 
     # Read in the CSV file containing extracted methods
     df = pd.read_csv(input_csv)
 
-    # Clean 'Method Code' column using preprocessing steps
+    # Clean "Method Code" column using preprocessing steps
     df = remove_comments_from_methods(df, column="Method Code")
     df = remove_duplicates(df)
     df = remove_outliers(df)
     df = remove_boilerplate_methods(df)
     df = filter_ascii_methods(df, column="Java Methods")
+    df = remove_unbalanced_delimiters(df)
 
-    # Tokenize 'Java Methods' column
+    # Tokenize "Java Methods" column
     df, all_tokens = tokenize_methods(df, column="Java Methods")
 
     # Print list of all tokens
-    #print("Total Tokens:",len(all_tokens))
+    print("Total Tokens:",len(all_tokens))
     #print(all_tokens)
 
-    df['Java Methods'] = df['Java Methods'].apply(lambda x: ' '.join(re.findall(r'\w+|[^\w\s]', x)))
-    ######### Creates STUDENT_TRAINING.TXT file! #########
-    # Convert 'Java Methods' df column into .txt file
-    java_methods = df['Java Methods'].dropna().astype(str)
+    df["Java Methods"] = df["Java Methods"].apply(lambda x: " ".join(re.findall(r"\w+|[^\w\s]", x)))
 
-    with open('data/student_training.txt', 'w', encoding='utf-8') as file:
+    # Convert "Java Methods" df column into .txt file
+    java_methods = df["Java Methods"].dropna().astype(str)
+
+    with open(STUDENT_TRAINING_PATH, "w", encoding="utf-8") as file:
         for method in java_methods:
             method_sentence = " ".join(method.splitlines())  # Remove newlines within each method
-            file.write(method_sentence + '\n')  # Write each method as a single line
+            file.write(method_sentence + "\n")  # Write each method as a single line
     
-    split_txt_file('data/student_training.txt', train_ratio=80, val_ratio=10, test_ratio=10)
-    return all_tokens
+    split_txt_file(STUDENT_TRAINING_PATH, train_ratio=80, val_ratio=10, test_ratio=10)
 
 
 def split_txt_file(input_txt, train_ratio, val_ratio, test_ratio,
@@ -271,9 +265,8 @@ def split_txt_file(input_txt, train_ratio, val_ratio, test_ratio,
     """
     Splits an input TXT file into three separate TXT files based on specified ratios.
     """
-    # Check that the ratios add up to 100
     if (train_ratio + val_ratio + test_ratio) != 100:
-        raise ValueError("The sum of train_ratio, val_ratio, and test_ratio must equal 100")
+        raise ValueError("The sum of train_ratio, val_ratio, and test_ratio must equal 100.")
 
     # Read the TXT file into a list of lines
     with open(input_txt, "r", encoding="utf-8") as file:
@@ -294,14 +287,88 @@ def split_txt_file(input_txt, train_ratio, val_ratio, test_ratio,
     test_lines = lines[train_count + val_count:]
 
     # Write the resulting split datasets to separate TXT files
-    with open('data/output_train.txt', "w", encoding="utf-8") as train_file:
+    with open(OUTPUT_TRAIN_PATH, "w", encoding="utf-8") as train_file:
         train_file.writelines(train_lines)
     
-    with open('data/output_val.txt', "w", encoding="utf-8") as val_file:
+    with open(OUTPUT_VAL_PATH, "w", encoding="utf-8") as val_file:
         val_file.writelines(val_lines)
     
-    with open('data/output_test.txt', "w", encoding="utf-8") as test_file:
+    with open(OUTPUT_TEST_PATH, "w", encoding="utf-8") as test_file:
         test_file.writelines(test_lines)
+
+
+def save_ngram_model(model, filename="ngram_model.pkl"):
+    """
+    Saves the n-gram model using pickle.
+    """
+    with open(filename, "wb") as file:
+        pickle.dump(model, file)
+    print(f"Model saved to {filename}.")
+
+
+def load_ngram_model(filename="ngram_model.pkl"):
+    """
+    Loads a pickled n-gram model.
+    """
+    with open(filename, "rb") as file:
+        model = pickle.load(file)
+    print(f"Model loaded from {filename}.")
+    return model
+
+
+def dataset_extraction():
+    """
+    Collect dataset of Java methods from repositories.
+    """
+    # Read in the CSV file containing repository names
+    repos = pd.read_csv(REPO_CSV_PATH)
+
+    # Create a list of repository URLs
+    repo_list = []
+    for index, row in repos.iterrows():
+        repo_list.append("https://www.github.com/{}".format(row["name"]))
+    repo_list = repo_list[:10]
+
+    # Run the extraction
+    extract_methods_to_csv(repo_list, OUTPUT_CSV_PATH)
+
+    print(f"Method extraction completed. Total methods processed: {method_count}. Results saved to {OUTPUT_CSV_PATH}.")
+
+
+def preprocessing():
+    input_csv = OUTPUT_CSV_PATH
+
+    # Read in the CSV file containing extracted methods
+    df = pd.read_csv(input_csv)
+
+    # Clean "Method Code" column using preprocessing steps
+    df = remove_comments_from_methods(df, column="Method Code")
+    df = remove_duplicates(df)
+    df = remove_outliers(df)
+    df = remove_boilerplate_methods(df)
+    df = filter_ascii_methods(df, column="Java Methods")
+
+    # Tokenize "Java Methods" column
+    df, all_tokens = tokenize_methods(df, column="Java Methods")
+
+    # Print list of all tokens
+    print("Total Tokens:",len(all_tokens))
+    # print(all_tokens)
+
+    # Remove newlines within each method and fixes spacing
+    df['Java Methods'] = df['Java Methods'].apply(lambda x: ' '.join(re.findall(r'\w+|[^\w\s]', x)))
+
+    # Convert "Java Methods" df column to string type
+    java_methods = df["Java Methods"].dropna().astype(str)
+
+    # Save the Java methods to the training dataset
+    with open(STUDENT_TRAINING_PATH, "w", encoding="utf-8") as file:
+        for method in java_methods:
+            method_sentence = " ".join(method.splitlines())  # Remove newlines within each method
+            file.write(method_sentence + "\n")  # Write each method as a single line
+    
+    split_txt_file(STUDENT_TRAINING_PATH, train_ratio=80, val_ratio=10, test_ratio=10)
+
 
 def create_n_gram_prob_df(corpus, n):
     count_matrix_dict = defaultdict(int)
@@ -320,57 +387,60 @@ def create_n_gram_prob_df(corpus, n):
     prob_matrix = {k: v / count_vocab[k[1]] for k, v in count_matrix_dict.items()}
 
     # Convert to DataFrame
-    df = pd.DataFrame.from_dict(prob_matrix, orient='index', columns=['Probability'])
-    df.index = pd.MultiIndex.from_tuples(df.index, names=['N-1 Gram', 'Next Word'])
+    df = pd.DataFrame.from_dict(prob_matrix, orient="index", columns=["Probability"])
+    df.index = pd.MultiIndex.from_tuples(df.index, names=["N-1 Gram", "Next Word"])
 
     return df
 
+
 # Testing
 def generate_next_token_prob(sentence, n, df):
-  """
-  Generate the most probable next token and probability based on a probability df. Returns tuple (next_token, next_token_prob).
-  """
-  n_gram = tuple(sentence[len(sentence)-n:len(sentence)])
-  n_gram_prefix = n_gram[len(n_gram)-n+1::]
-#   if n_gram_prefix not in df.index:
-#     print(f"Warning: {n_gram_prefix} not found in df index.")
-#     return None
-  ###-----non-random
-  next_word = df.loc[n_gram_prefix].idxmax()[0]
-  next_word_prob = df.loc[n_gram_prefix].max()[0]
+    """
+    Generate the most probable next token and probability based on a probability df. Returns tuple (next_token, next_token_prob).
+    """
+    n_gram = tuple(sentence[len(sentence)-n:len(sentence)])
+    n_gram_prefix = n_gram[len(n_gram)-n+1::]
 
-  ##----non-random
+    #   if n_gram_prefix not in df.index:
+    #     print(f"Warning: {n_gram_prefix} not found in df index.")
+    #     return None
 
+    ###-----non-random
+    next_word = df.loc[n_gram_prefix].idxmax()[0]
+    next_word_prob = df.loc[n_gram_prefix].max()[0]
+    ##----non-random
 
-  ##--- randomness 
-  # All possible next words for the given prefix
-  # next_words = df.loc[n_gram_prefix]
+    ##--- randomness 
+    # All possible next words for the given prefix
+    # next_words = df.loc[n_gram_prefix]
 
-  # if len(next_words) >1 :
-  #   print("multiple next words")
-  # else:
-  #   print("single next word")
+    # if len(next_words) >1 :
+    #   print("multiple next words")
+    # else:
+    #   print("single next word")
 
-  # # Find the max probability
-  # next_word_prob = next_words['Probability'].max()
+    # # Find the max probability
+    # next_word_prob = next_words["Probability"].max()
 
-  # # Get all words with the max probability
-  # candidates = next_words[next_words['Probability'] == next_word_prob].index.to_list()
+    # # Get all words with the max probability
+    # candidates = next_words[next_words["Probability"] == next_word_prob].index.to_list()
 
-  # # Choose randomly among the highest probability words
-  # next_word = np.random.choice(candidates)
-  ##--- randomness 
+    # # Choose randomly among the highest probability words
+    # next_word = np.random.choice(candidates)
+    ##--- randomness 
 
-  return (next_word, next_word_prob)
+    return (next_word, next_word_prob)
+
 
 # Evaluation
 def iterative_prediction(sentence, n, df):
-  """
-  Returns a list of tuples containing the next tokens generated to complete the sentence and their probabilities.
-  """
-  gen_token_prob = []
+    """
+    Returns a list of tuples containing the next tokens generated to complete the sentence and their probabilities.
+    """
+    gen_token_prob = []
 
-  def code_completion(sentence, n, df, remain_token_count):
+
+def code_completion(sentence, n, df, remain_token_count):
     """
     Recursively generates text until a stopping condition is met.
     """
@@ -395,26 +465,27 @@ def iterative_prediction(sentence, n, df):
 
     return code_completion(sentence, n, df, remain_token_count-1)
 
-  start_sentence = sentence[:n]
-  final_sentence = code_completion(start_sentence, n, df, len(sentence) - n)
-  return gen_token_prob
+    start_sentence = sentence[:n]
+    final_sentence = code_completion(start_sentence, n, df, len(sentence) - n)
+    return gen_token_prob
 
 
 def create_results_json(predict_prob_dict, filename, limit):
   """
   Creates a json file containing the results of the iterative prediction.
   """
-  with open(filename + '.json', 'w') as f:
-    f.write('{\n')
+  with open(filename + ".json", "w") as f:
+    f.write("{\n")
     for index, (key, values) in enumerate(predict_prob_dict.items()):
         f.write(f'"{key}": {json.dumps(values)}')
         # Prevents trailing last comma
         if index < limit-1:
-            f.write(',\n')
+            f.write(",\n")
         else:
-            f.write('\n')
+            f.write("\n")
             break
-    f.write('}\n')
+    f.write("}\n")
+
 
 def generate_predict_prob(sentences, n, model):
     """
@@ -428,6 +499,7 @@ def generate_predict_prob(sentences, n, model):
         # Add probabilities to dictionary with progressive ID as the key
         predict_prob[len(predict_prob)] = gen_token_prob
     return predict_prob
+
 
 def calculate_perplexity(predict_prob_dict, model):
     """
@@ -445,37 +517,47 @@ def calculate_perplexity(predict_prob_dict, model):
     perplexity = math.exp(-log_prob_sum / total_tokens)
     return perplexity
 
+
 def tokenize_java_file(file_path):
-  with open(file_path, 'r', encoding='utf-8') as f:
+  with open(file_path, "r", encoding="utf-8") as f:
       java_code = f.read().split()
 
   return java_code
 
+
 def convert_txt_to_sentences(file_path):
     sentences = []
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, "r", encoding="utf-8") as f:
         for line in f:
             sentences.append(line.strip().split())
     return sentences
+
 
 
 # Global counter to track the total number of methods processed
 method_count = 0
 
 def main():
-    # Extract methods from repositories and save to CSV
-    #dataset_collection()
+    # Time the dataset collection process
+    start_time = time.time()
+    dataset_extraction()
+    end_time = time.time()
+    print(f"Dataset extraction took {end_time - start_time:.2f} seconds.")
 
-    # Cleaning and preprocessing method data into tokens 
-    # preprocessing()
+    # Time the preprocessing process
+    start_time = time.time()
+    preprocessing()
+    end_time = time.time()
+    print(f"Preprocessing took {end_time - start_time:.2f} seconds.")
     # tokens = tokenize_java_file("data/student_training.txt")
     # # for token in tokens:
     # #     print(token, "\n")
+    
     # # Creating N-gram model
     # n = 3
     # model = create_n_gram_prob_df(tokens, n)
 
-    # # # Evaluate model, best model is n = X TODO
+    # # Evaluate model, best model is n = X TODO
     # eval_sentences = convert_txt_to_sentences("data/student_training.txt")
     # eval_sentences_predic_prob_dict = generate_predict_prob(eval_sentences,n,model)
     # create_results_json(eval_sentences_predic_prob_dict,"results_student_model", 100)
@@ -483,28 +565,32 @@ def main():
     # eval_sentences_perplexity = calculate_perplexity(eval_sentences_predic_prob_dict, model)
     # print("eval_sentences_perplexity", eval_sentences_perplexity)
 
-    # Test best model
+    # # Test best model
     # test_sentences = convert_txt_to_sentences("data/output_test.txt")
     # test_sentences_predic_prob_dict = generate_predict_prob(test_sentences,n,model)
+
     # test_sentences_perplexity = calculate_perplexity(test_sentences_predic_prob_dict, model)
     # print("test_sentences_perplexity", test_sentences_perplexity)
+
     # create_results_json(test_sentences_predic_prob_dict,"results_student_model", 100)
 
+    # # Testing 
+    # tokens = tokenize_java_file("training.txt")
+    # n = 3 
+    # model = create_n_gram_prob_df(tokens, n)
+    # sentences = convert_txt_to_sentences("training.txt")
+    # predic_prob_dict = generate_predict_prob(sentences, n , model)
+    # #print(predic_prob_dict)
+    # perplexity = calculate_perplexity(predic_prob_dict, model)
+    # create_results_json(predic_prob_dict, "prof", 100)
+    # #print(perplexity)
 
+    ## TODO repeat above process with prof antonio"s data 
 
-    # ####testing 
-    tokens = tokenize_java_file("training.txt")
-    n = 3 
-    model = create_n_gram_prob_df(tokens, n)
-    sentences = convert_txt_to_sentences("training.txt")
-    predic_prob_dict = generate_predict_prob(sentences, n , model)
-    # print(predic_prob_dict)
-    perplexity = calculate_perplexity(predic_prob_dict, model)
-    create_results_json(predic_prob_dict, "prof", 100)
-    # print(perplexity)
-
-
-    ## TODO repeat above process with prof antonio's data 
+    # # Pickle and save n-gram model
+    # save_ngram_model(model)  # Save to file
+    # loaded_model = load_ngram_model()  # Load back the model
+    # print(loaded_model)  # View the loaded model
 
 if __name__ == "__main__":
   main()

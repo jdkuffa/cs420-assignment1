@@ -27,5 +27,5 @@ replay_pid*
 venv/
 
 # Generated files
-data/generated_files/
-datasets/
+data/generated_methods/
+data/datasets/
