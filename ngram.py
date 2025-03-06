@@ -22,7 +22,7 @@ from collections import OrderedDict, defaultdict
 from operator import itemgetter
 
 # Constants
-REPO_NUM = 50
+REPO_NUM = 30
 MAX_METHODS = 100000
 TRAIN_RATIO = 80
 VAL_RATIO = 10
@@ -103,7 +103,7 @@ def extract_methods_to_csv(repo_list, output_csv):
 
     with open(output_csv, mode="w", newline="", encoding="utf-8", errors="replace") as csvfile:
         csv_writer = csv.writer(csvfile)
-        csv_writer.writerow(["File Name", "Method Name", "Method Code"]) 
+        csv_writer.writerow(["Repository", "File Name", "Method Name", "Method Code"]) 
 
         for repo_path in repo_list:
             print(f"Processing repository {repo_list.index(repo_path) + 1}: {repo_path}. {method_count} methods processed so far...")
@@ -120,7 +120,7 @@ def extract_methods_to_csv(repo_list, output_csv):
                             methods = extract_methods_from_java(source_code)
 
                             for method_name, method_code in methods:
-                                csv_writer.writerow([file, method_name, method_code])
+                                csv_writer.writerow([repo_path, file, method_name, method_code])
                                 method_count += 1
 
                                 if method_count >= MAX_METHODS:
