@@ -100,12 +100,12 @@ def extract_methods_to_csv(repo_list, output_csv):
     """
     global method_count
 
-    with open(output_csv, mode="w", newline="", encoding="utf-8") as csvfile:
+    with open(output_csv, mode="w", newline="", encoding="utf-8", errors="replace") as csvfile:
         csv_writer = csv.writer(csvfile)
         csv_writer.writerow(["File Name", "Method Name", "Method Code"]) 
 
         for repo_path in repo_list:
-            print(f"Processing repository: {repo_path}. {method_count} methods processed so far...")
+            print(f"Processing repository {repo_list.index(repo_path) + 1}: {repo_path}. {method_count} methods processed so far...")
 
             branch_name = get_default_branch(repo_path)
             repo = git.Repo.clone_from(repo_path, tempfile.mkdtemp(), branch=branch_name)
