@@ -9,6 +9,7 @@ import tempfile
 import json
 import pandas as pd
 import math
+import sys
 import time
 from pydriller import Repository
 import javalang
@@ -18,7 +19,7 @@ from pygments.lexers import JavaLexer
 from pygments import lex
 from pygments.token import Token
 from collections import OrderedDict, defaultdict
-
+from operator import itemgetter
 
 # Constants
 REPO_NUM = 50
@@ -361,41 +362,16 @@ def create_n_gram_prob_df(corpus, n):
 
 # Testing
 def generate_next_token_prob(sentence, n, df):
-    """
-    Generate the most probable next token and probability based on a probability df. Returns tuple (next_token, next_token_prob).
-    """
-    n_gram = tuple(sentence[len(sentence)-n:len(sentence)])
-    n_gram_prefix = n_gram[len(n_gram)-n+1::]
-
-    #   if n_gram_prefix not in df.index:
-    #     print(f"Warning: {n_gram_prefix} not found in df index.")
-    #     return None
-
-    ###-----non-random
-    next_word = df.loc[n_gram_prefix].idxmax()[0]
-    next_word_prob = df.loc[n_gram_prefix].max()[0]
-    ##----non-random
-
-    ##--- randomness 
-    # All possible next words for the given prefix
-    # next_words = df.loc[n_gram_prefix]
-
-    # if len(next_words) >1 :
-    #   print("multiple next words")
-    # else:
-    #   print("single next word")
-
-    # # Find the max probability
-    # next_word_prob = next_words["Probability"].max()
-
-    # # Get all words with the max probability
-    # candidates = next_words[next_words["Probability"] == next_word_prob].index.to_list()
-
-    # # Choose randomly among the highest probability words
-    # next_word = np.random.choice(candidates)
-    ##--- randomness 
-
-    return (next_word, next_word_prob)
+  """
+  Generate the most probable next token and probability based on a probability df. Returns tuple (next_token, next_token_prob).
+  """
+  n_gram = tuple(sentence[len(sentence)-n:len(sentence)])
+  n_gram_prefix = n_gram[len(n_gram)-n+1::]
+  if n_gram_prefix not in df.index.levels[0]:
+    return None
+  next_word = df.loc[n_gram_prefix].idxmax()[0]
+  next_word_prob = df.loc[n_gram_prefix].max()[0]
+  return (next_word, next_word_prob)
 
 
 # Evaluation
@@ -417,8 +393,8 @@ def code_completion(sentence, n, df, remain_token_count):
     # Generate the next token and probability
     generate_next_token_res = generate_next_token_prob(sentence, n, df)
 
-    # if not generate_next_token_res:
-    #     return sentence
+    if not generate_next_token_res:
+        return sentence
 
     next_token = generate_next_token_res[0]
     next_token_prob = generate_next_token_res[1]
@@ -436,7 +412,7 @@ def code_completion(sentence, n, df, remain_token_count):
     return gen_token_prob
 
 
-def create_results_json(predict_prob_dict, filename, limit):
+def create_results_json(predict_prob_dict, filename):
   """
   Creates a json file containing the results of the iterative prediction.
   """
@@ -445,8 +421,8 @@ def create_results_json(predict_prob_dict, filename, limit):
     for index, (key, values) in enumerate(predict_prob_dict.items()):
         f.write(f'"{key}": {json.dumps(values)}')
         # Prevents trailing last comma
-        if index < limit-1:
-            f.write(",\n")
+        if index < len(predict_prob_dict)-1:
+            f.write(',\n')
         else:
             f.write("\n")
             break
@@ -540,23 +516,60 @@ def main():
 
     # create_results_json(test_sentences_predic_prob_dict,"results_student_model", 100)
 
-    # # Testing 
-    # tokens = tokenize_java_file("training.txt")
-    # n = 3 
-    # model = create_n_gram_prob_df(tokens, n)
-    # sentences = convert_txt_to_sentences("training.txt")
-    # predic_prob_dict = generate_predict_prob(sentences, n , model)
-    # #print(predic_prob_dict)
+
+
+    # ####testing 
+    tokens = tokenize_java_file("training.txt")
+    n = 3 
+    model = create_n_gram_prob_df(tokens, n)
+    print(model)
+    print(model.index.levels[0])
+    # print(model['N-1 Gram'].values)
+    sentences = convert_txt_to_sentences("training.txt")
+    predic_prob_dict = generate_predict_prob(sentences, n , model)
+    # # print(predic_prob_dict)
     # perplexity = calculate_perplexity(predic_prob_dict, model)
     # create_results_json(predic_prob_dict, "prof", 100)
-    # #print(perplexity)
+    # print(perplexity)
 
-    ## TODO repeat above process with prof antonio"s data 
 
-    # # Pickle and save n-gram model
-    # save_ngram_model(model)  # Save to file
-    # loaded_model = load_ngram_model()  # Load back the model
-    # print(loaded_model)  # View the loaded model
+    if len(sys.argv) == 2:
+
+        """
+        The following methods were used to to generate our train, test, and eval sets
+        # Extract methods from repositories and save to CSV
+        dataset_collection()
+
+        # Cleaning and preprocessing method data into tokens 
+        preprocessing()
+        """
+
+
+        corpus_path = sys.argv[1]
+
+        # Identify best-performing model based on n 
+        vocab_tokens = tokenize_java_file(corpus_path)
+
+        eval_sentences = convert_txt_to_sentences(OUTPUT_VAL_PATH)
+        models_perplex = []
+        n_values = [3,5,7]
+        for n in n_values:
+            model = create_n_gram_prob_df(vocab_tokens, n)
+            predic_prob_dict = generate_predict_prob(eval_sentences, n , model)
+            perplexity = calculate_perplexity(predic_prob_dict)
+            models_perplex.append((n,perplexity))
+        best_n = min(models_perplex, key=itemgetter(1))[0]
+        print("best model is ", best_n, " with the perplexity of ", min(models_perplex, key=itemgetter(1))[1])
+
+        # Testing with best-performing model
+        model = create_n_gram_prob_df(vocab_tokens, best_n)
+        test_sentences = convert_txt_to_sentences(OUTPUT_TEST_PATH)
+        rand_test_sentences = random.sample(test_sentences, k = 100) 
+
+        predic_prob_dict = generate_predict_prob(rand_test_sentences, best_n, model)
+        perplexity = calculate_perplexity(predic_prob_dict)
+        create_results_json(predic_prob_dict, "results_student_model")
+
 
 if __name__ == "__main__":
   main()

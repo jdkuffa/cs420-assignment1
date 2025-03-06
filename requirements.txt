@@ -3,3 +3,4 @@ pandas
 pygments
 pydriller
 javalang
+gitpythons
