@@ -10,7 +10,9 @@
 ---
 
 # **1. Introduction**  
-This project explores **code completion in Java**, leveraging **N-gram language modeling**. The N-gram model predicts the next token in a sequence by learning the probability distributions of token occurrences in training data. The model selects the most probable token based on learned patterns, making it a fundamental technique in natural language processing and software engineering automation.  
+This project explores **code completion in Java**, leveraging **N-gram language modeling**. The N-gram model predicts the next token in a sequence by learning the probability distributions of token occurrences in training data. The model selects the most probable token based on learned patterns, making it a fundamental technique in natural language processing and software engineering automation. 
+
+The extracted data and the training, testing, and evaluating sets are pre-generated in this repository. The code used for the dataset collection and data splitting is still available in ngram.py. 
 
 ---
 
@@ -57,9 +59,7 @@ Install the required dependencies:
 
 (1) Run N-gram Demo
 
-The script takes a corpus of Java methods as input and automatically identifies the best-performing model based on a specific N-value. It then evaluates the selected model on the test set extracted according to the assignment specifications.
-Since the training corpus differs from both the instructor-provided dataset and our own dataset, we store the results in a file named results_provided_model.[json/csv/txt] to distinguish them accordingly.
-
+This script creates a new N-gram model using the corpus provided and selects the best-performing model based on our eval set. It then evaluates the model on the same eval set and generate the JSON output results_teacher_model.json.
 ```
 (venv) ~/cs420-assignment1 $ python ngram.py corpus.txt
 ```
